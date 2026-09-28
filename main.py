@@ -4,9 +4,9 @@ import numpy as np
 import math
 import time
 import threading
-import winsound  # Windows built-in sound library
+import winsound
 
-# Sound player (Threaded so FPS drops aagadhu)
+# Sound feedback (Asynchronous thread)
 def play_snap_sound():
     def _sound():
         winsound.Beep(1200, 100)
@@ -24,10 +24,10 @@ mp_draw = mp.solutions.drawing_utils
 
 cap = cv2.VideoCapture(0)
 
-# --- 3D MODELS GENERATION ---
-NUM_PARTICLES = 900
+# --- 3D PROCEDURAL MODELS GENERATION ---
+NUM_PARTICLES = 950
 
-# 1. Sphere
+# 1. Cyber Sphere
 indices = np.arange(0, NUM_PARTICLES, dtype=float) + 0.5
 phi = np.arccos(1 - 2 * indices / NUM_PARTICLES)
 theta = np.pi * (1 + 5**0.5) * indices
@@ -36,7 +36,7 @@ s_y = np.sin(theta) * np.sin(phi) * 150
 s_z = np.cos(phi) * 150
 sphere_model = np.stack([s_x, s_y, s_z], axis=1)
 
-# 2. DNA Helix
+# 2. DNA Double Helix
 t = np.linspace(-4 * np.pi, 4 * np.pi, NUM_PARTICLES // 2)
 dna1_x = np.cos(t) * 75
 dna1_y = t * 24
@@ -49,7 +49,7 @@ dna_model = np.vstack([
     np.stack([dna2_x, dna2_y, dna2_z], axis=1)
 ])
 
-# 3. Saturn with Rings
+# 3. Planet Saturn
 core_count = NUM_PARTICLES // 3
 ring_count = NUM_PARTICLES - core_count
 c_indices = np.arange(0, core_count, dtype=float) + 0.5
@@ -76,28 +76,44 @@ tilt_matrix = np.array([
 saturn_rings = np.dot(saturn_rings, tilt_matrix)
 saturn_model = np.vstack([saturn_core, saturn_rings])
 
-# Models Metadata & Educational Database
+# 4. 3D Human Heart (Parametric Cardioid Volume)
+u = np.random.uniform(0, 2 * np.pi, NUM_PARTICLES)
+v = np.random.uniform(-np.pi / 2, np.pi / 2, NUM_PARTICLES)
+
+h_x = 16 * (np.sin(u) ** 3) * np.cos(v) * 7.5
+h_y = -(13 * np.cos(u) - 5 * np.cos(2*u) - 2 * np.cos(3*u) - np.cos(4*u)) * np.cos(v) * 7.5
+h_z = 25 * np.sin(v) * 4.5
+heart_base = np.stack([h_x, h_y, h_z], axis=1)
+
+# Models Database
 MODELS = [
     {
-        "name": "CYBER SPHERE", 
-        "data": sphere_model, 
-        "color": (255, 255, 0),
-        "desc_1": "Core Type: Quantum Particle Singularity",
-        "desc_2": "Nodes: 900 synced energy points"
+        "name": "HUMAN HEART", 
+        "data": heart_base.copy(), 
+        "color": (40, 50, 255),  # Crimson Red
+        "desc_1": "BPM: 72 (Normal Sinus Rhythm)",
+        "desc_2": "Anatomy: 4 Chambers (Atria & Ventricles)"
     },
     {
         "name": "DNA DOUBLE HELIX", 
         "data": dna_model, 
-        "color": (255, 0, 255),
+        "color": (255, 0, 255),  # Magenta
         "desc_1": "Base Pairs: Adenine-Thymine | Guanine-Cytosine",
-        "desc_2": "Structure: Right-handed antiparallel double helix"
+        "desc_2": "Structure: Right-handed antiparallel helix"
     },
     {
         "name": "PLANET SATURN", 
         "data": saturn_model, 
-        "color": (0, 215, 255),
+        "color": (0, 215, 255),  # Golden Orange
         "desc_1": "Atmosphere: 96% Hydrogen | 3% Helium",
-        "desc_2": "Rings: 99% Water ice particles & cosmic dust"
+        "desc_2": "Rings: 99% Water ice particles"
+    },
+    {
+        "name": "CYBER SPHERE", 
+        "data": sphere_model, 
+        "color": (255, 255, 0),  # Cyan
+        "desc_1": "Core Type: Quantum Particle Singularity",
+        "desc_2": "Nodes: 950 synced energy points"
     }
 ]
 
@@ -125,9 +141,21 @@ while True:
     img = cv2.flip(img, 1)
     h, w, _ = img.shape
     
-    display_frame = cv2.addWeighted(img, 0.35, np.zeros_like(img), 0.65, 0)
+    # ─── INGA MAATHUNGA ───
+    # Pazhaya line-a comment pannitu, idha podunga:
+    display_frame = cv2.convertScaleAbs(img, alpha=1.1, beta=15)
+    # ───────────────────────
+    
     img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     results = hands.process(img_rgb)
+    ...
+    # Cardiac Beating Pulse (Lub-Dub effect)
+    if MODELS[current_model_idx]["name"] == "HUMAN HEART":
+        beat_t = time.time() * 5.0
+        pulse = 1.0 + 0.12 * (np.sin(beat_t) ** 8) + 0.05 * (np.sin(beat_t + 0.4) ** 8)
+        active_target_data = heart_base * pulse
+    else:
+        active_target_data = MODELS[current_model_idx]["data"]
 
     target_shape = explode_points
     gesture_detected = "Floating Cloud"
@@ -155,13 +183,12 @@ while True:
 
             hand_centers.append((int(wrist.x * w), int(wrist.y * h)))
 
-            # Gestures
             pinch_dist = get_distance(thumb_tip, index_tip)
             hand_open_dist = get_distance(wrist, middle_tip)
             wrist_angle = get_angle(wrist, lm[9])
             current_rot_y = np.radians(wrist_angle * 1.5)
 
-            # Check if Index Finger is Pointing (Index up, other fingers folded)
+            # Point to Inspect
             is_pointing = (index_tip.y < index_pip.y) and \
                           (middle_tip.y > middle_pip.y) and \
                           (ring_tip.y > ring_pip.y) and \
@@ -171,10 +198,10 @@ while True:
                 inspecting = True
                 pointer_pos = (int(index_tip.x * w), int(index_tip.y * h))
                 gesture_detected = "Pointing: Inspect Mode"
-                target_shape = MODELS[current_model_idx]["data"]
+                target_shape = active_target_data
             elif pinch_dist < 0.045:
                 gesture_detected = "Snap: Model Switch!"
-                target_shape = MODELS[current_model_idx]["data"]
+                target_shape = active_target_data
                 
                 if time.time() - last_switch_time > 1.2:
                     current_model_idx = (current_model_idx + 1) % len(MODELS)
@@ -182,7 +209,7 @@ while True:
                     last_switch_time = time.time()
             elif hand_open_dist < 0.2:
                 gesture_detected = "Fist: Assembled"
-                target_shape = MODELS[current_model_idx]["data"]
+                target_shape = active_target_data
             elif hand_open_dist > 0.38:
                 gesture_detected = "Open Hand: Explode"
                 target_shape = explode_points
@@ -195,7 +222,7 @@ while True:
             target_scale = np.clip(dist / 220.0, 0.5, 2.5)
             current_scale += (target_scale - current_scale) * 0.1
 
-    # Physics interpolation
+    # Physics interpolation (LERP)
     current_particles += (target_shape - current_particles) * 0.14
 
     # 3D Rotation
@@ -207,7 +234,7 @@ while True:
     ])
     rotated = np.dot(current_particles * current_scale, rot_matrix)
 
-    # 3D Projection
+    # 3D to 2D Projection
     cx, cy = w // 2, h // 2
     fov = 500
     active_color = MODELS[current_model_idx]["color"]
@@ -222,21 +249,17 @@ while True:
                 radius = 2 if depth > fov else 3
                 cv2.circle(display_frame, (px, py), radius, active_color, -1)
 
-    # INSPECTION CROSSHAIR & INFO CARD OVERLAY
+    # Inspect HUD
     if inspecting and pointer_pos:
         px, py = pointer_pos
-        # Target HUD Crosshair
         cv2.circle(display_frame, (px, py), 22, (0, 255, 255), 2)
         cv2.line(display_frame, (px - 30, py), (px + 30, py), (0, 255, 255), 1)
         cv2.line(display_frame, (px, py - 30), (px, py + 30), (0, 255, 255), 1)
 
-        # Floating Educational Card
         card_x, card_y = min(px + 35, w - 380), max(py - 60, 40)
-        # Background card glow
         cv2.rectangle(display_frame, (card_x, card_y), (card_x + 360, card_y + 90), (20, 20, 20), -1)
         cv2.rectangle(display_frame, (card_x, card_y), (card_x + 360, card_y + 90), (0, 255, 255), 2)
         
-        # Details inside card
         model_info = MODELS[current_model_idx]
         cv2.putText(display_frame, f"INSPECTION: {model_info['name']}", (card_x + 10, card_y + 25), 
                     cv2.FONT_HERSHEY_DUPLEX, 0.55, (0, 255, 255), 1)
@@ -245,13 +268,13 @@ while True:
         cv2.putText(display_frame, model_info["desc_2"], (card_x + 10, card_y + 75), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.45, (180, 255, 180), 1)
 
-    # General HUD Header
+    # HUD Header
     active_name = MODELS[current_model_idx]["name"]
     cv2.putText(display_frame, f"WONDERSNAP: {active_name}", (20, 40), 
                 cv2.FONT_HERSHEY_DUPLEX, 0.8, active_color, 2)
     cv2.putText(display_frame, f"Status: {gesture_detected}", (20, 75), 
                 cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 0), 2)
-    cv2.putText(display_frame, "[Snap]: Switch Model | [Point]: Inspect | [Fist]: Assemble | [Open]: Explode", 
+    cv2.putText(display_frame, "[Snap]: Switch | [Point]: Inspect | [Fist]: Assemble | [Open]: Explode", 
                 (20, h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
 
     cv2.imshow("WonderSnap - Analysis Lab", display_frame)
