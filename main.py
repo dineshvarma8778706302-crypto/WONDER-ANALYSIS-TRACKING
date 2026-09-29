@@ -5,13 +5,21 @@ import math
 import time
 import threading
 import winsound
+import subprocess
+from collections import deque
 
-# Sound feedback (Asynchronous thread)
+# --- MULTITHREADED AUDIO & VOICE ENGINE ---
 def play_snap_sound():
     def _sound():
-        winsound.Beep(1200, 100)
-        winsound.Beep(1800, 120)
+        winsound.Beep(1200, 80)
+        winsound.Beep(1800, 100)
     threading.Thread(target=_sound, daemon=True).start()
+
+def speak_voice(text):
+    def _speak():
+        cmd = f'powershell -Command "Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak(\'{text}\')"'
+        subprocess.run(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    threading.Thread(target=_speak, daemon=True).start()
 
 # MediaPipe setup
 mp_hands = mp.solutions.hands
@@ -25,7 +33,7 @@ mp_draw = mp.solutions.drawing_utils
 cap = cv2.VideoCapture(0)
 
 # --- 3D PROCEDURAL MODELS GENERATION ---
-NUM_PARTICLES = 950
+NUM_PARTICLES = 1000
 
 # 1. Cyber Sphere
 indices = np.arange(0, NUM_PARTICLES, dtype=float) + 0.5
@@ -76,52 +84,66 @@ tilt_matrix = np.array([
 saturn_rings = np.dot(saturn_rings, tilt_matrix)
 saturn_model = np.vstack([saturn_core, saturn_rings])
 
-# 4. 3D Human Heart (Parametric Cardioid Volume)
+# 4. Human Heart
 u = np.random.uniform(0, 2 * np.pi, NUM_PARTICLES)
 v = np.random.uniform(-np.pi / 2, np.pi / 2, NUM_PARTICLES)
-
 h_x = 16 * (np.sin(u) ** 3) * np.cos(v) * 7.5
 h_y = -(13 * np.cos(u) - 5 * np.cos(2*u) - 2 * np.cos(3*u) - np.cos(4*u)) * np.cos(v) * 7.5
 h_z = 25 * np.sin(v) * 4.5
 heart_base = np.stack([h_x, h_y, h_z], axis=1)
 
-# Models Database
+# 5. Cosmic Black Hole
+bh_radii = np.random.uniform(45, 230, NUM_PARTICLES)
+bh_base_angles = np.random.uniform(0, 2 * np.pi, NUM_PARTICLES)
+bh_speeds = 350.0 / (bh_radii ** 1.1)
+bh_warp = np.where(np.sin(bh_base_angles) > 0, (bh_radii / 230.0) * 45, 0)
+bh_y = np.random.uniform(-5, 5, NUM_PARTICLES) + bh_warp
+
+bh_tilt = np.radians(35)
+bh_rot_x = np.array([
+    [1, 0, 0],
+    [0, np.cos(bh_tilt), -np.sin(bh_tilt)],
+    [0, np.sin(bh_tilt), np.cos(bh_tilt)]
+])
+
+# Models Catalogue
 MODELS = [
+    {
+        "name": "COSMIC BLACK HOLE", 
+        "data": None,
+        "color": (0, 140, 255)  # Plasma Orange
+    },
     {
         "name": "HUMAN HEART", 
         "data": heart_base.copy(), 
-        "color": (40, 50, 255),  # Crimson Red
-        "desc_1": "BPM: 72 (Normal Sinus Rhythm)",
-        "desc_2": "Anatomy: 4 Chambers (Atria & Ventricles)"
+        "color": (40, 50, 255)  # Crimson Red
     },
     {
         "name": "DNA DOUBLE HELIX", 
         "data": dna_model, 
-        "color": (255, 0, 255),  # Magenta
-        "desc_1": "Base Pairs: Adenine-Thymine | Guanine-Cytosine",
-        "desc_2": "Structure: Right-handed antiparallel helix"
+        "color": (255, 0, 255)  # Magenta
     },
     {
         "name": "PLANET SATURN", 
         "data": saturn_model, 
-        "color": (0, 215, 255),  # Golden Orange
-        "desc_1": "Atmosphere: 96% Hydrogen | 3% Helium",
-        "desc_2": "Rings: 99% Water ice particles"
+        "color": (0, 215, 255)  # Golden Orange
     },
     {
         "name": "CYBER SPHERE", 
         "data": sphere_model, 
-        "color": (255, 255, 0),  # Cyan
-        "desc_1": "Core Type: Quantum Particle Singularity",
-        "desc_2": "Nodes: 950 synced energy points"
+        "color": (255, 255, 0)  # Cyan
     }
 ]
 
 current_model_idx = 0
 last_switch_time = 0
+snap_ready = True  # Latch to prevent auto-switching
 
 explode_points = np.random.uniform(-350, 350, (NUM_PARTICLES, 3))
 current_particles = explode_points.copy()
+
+# Hand Energy Trails Buffer
+trail_points = deque(maxlen=24)
 
 def get_distance(p1, p2):
     return math.hypot(p2.x - p1.x, p2.y - p1.y)
@@ -133,6 +155,11 @@ def get_angle(p1, p2):
 current_scale = 1.0
 current_rot_y = 0.0
 
+prev_frame_time = time.time()
+fps = 30.0
+
+speak_voice("WonderSnap online. Loading Cosmic Black Hole.")
+
 while True:
     success, img = cap.read()
     if not success:
@@ -141,27 +168,34 @@ while True:
     img = cv2.flip(img, 1)
     h, w, _ = img.shape
     
-    # ─── INGA MAATHUNGA ───
-    # Pazhaya line-a comment pannitu, idha podunga:
+    # Studio lighting
     display_frame = cv2.convertScaleAbs(img, alpha=1.1, beta=15)
-    # ───────────────────────
-    
     img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    
+    inference_start = time.time()
     results = hands.process(img_rgb)
-    ...
-    # Cardiac Beating Pulse (Lub-Dub effect)
-    if MODELS[current_model_idx]["name"] == "HUMAN HEART":
+    latency_ms = (time.time() - inference_start) * 1000
+
+    active_name = MODELS[current_model_idx]["name"]
+
+    # Dynamic target animations
+    if active_name == "HUMAN HEART":
         beat_t = time.time() * 5.0
         pulse = 1.0 + 0.12 * (np.sin(beat_t) ** 8) + 0.05 * (np.sin(beat_t + 0.4) ** 8)
         active_target_data = heart_base * pulse
+    elif active_name == "COSMIC BLACK HOLE":
+        cur_t = time.time()
+        cur_angles = bh_base_angles + (bh_speeds * cur_t * 0.08)
+        bx = np.cos(cur_angles) * bh_radii
+        bz = np.sin(cur_angles) * bh_radii
+        raw_bh = np.stack([bx, bh_y, bz], axis=1)
+        active_target_data = np.dot(raw_bh, bh_rot_x)
     else:
         active_target_data = MODELS[current_model_idx]["data"]
 
     target_shape = explode_points
     gesture_detected = "Floating Cloud"
     hand_centers = []
-    inspecting = False
-    pointer_pos = None
 
     if results.multi_hand_landmarks:
         num_hands = len(results.multi_hand_landmarks)
@@ -173,46 +207,48 @@ while True:
             wrist = lm[0]
             thumb_tip = lm[4]
             index_tip = lm[8]
-            index_pip = lm[6]
             middle_tip = lm[12]
-            middle_pip = lm[10]
-            ring_tip = lm[16]
-            ring_pip = lm[14]
-            pinky_tip = lm[20]
-            pinky_pip = lm[18]
 
             hand_centers.append((int(wrist.x * w), int(wrist.y * h)))
+            trail_points.append((int(index_tip.x * w), int(index_tip.y * h)))
 
             pinch_dist = get_distance(thumb_tip, index_tip)
             hand_open_dist = get_distance(wrist, middle_tip)
             wrist_angle = get_angle(wrist, lm[9])
             current_rot_y = np.radians(wrist_angle * 1.5)
 
-            # Point to Inspect
-            is_pointing = (index_tip.y < index_pip.y) and \
-                          (middle_tip.y > middle_pip.y) and \
-                          (ring_tip.y > ring_pip.y) and \
-                          (pinky_tip.y > pinky_pip.y)
-
-            if is_pointing:
-                inspecting = True
-                pointer_pos = (int(index_tip.x * w), int(index_tip.y * h))
-                gesture_detected = "Pointing: Inspect Mode"
-                target_shape = active_target_data
-            elif pinch_dist < 0.045:
-                gesture_detected = "Snap: Model Switch!"
-                target_shape = active_target_data
-                
-                if time.time() - last_switch_time > 1.2:
-                    current_model_idx = (current_model_idx + 1) % len(MODELS)
-                    play_snap_sound()
-                    last_switch_time = time.time()
-            elif hand_open_dist < 0.2:
+            # --- GESTURE HIERARCHY (Fixed order to stop auto-switching) ---
+            
+            # 1. First priority: Fist (Assemble)
+            if hand_open_dist < 0.22:
                 gesture_detected = "Fist: Assembled"
                 target_shape = active_target_data
+
+            # 2. Second priority: Open Hand (Explode)
             elif hand_open_dist > 0.38:
                 gesture_detected = "Open Hand: Explode"
                 target_shape = explode_points
+
+            # 3. Third priority: Snap / Pinch (Only if hand is NOT a fist)
+            elif pinch_dist < 0.04:
+                gesture_detected = "Snap: Model Switch!"
+                target_shape = active_target_data
+                
+                # Triggers only ONCE per pinch (requires release)
+                if snap_ready and (time.time() - last_switch_time > 1.5):
+                    current_model_idx = (current_model_idx + 1) % len(MODELS)
+                    new_model_name = MODELS[current_model_idx]["name"]
+                    play_snap_sound()
+                    speak_voice(f"Switching to {new_model_name}")
+                    last_switch_time = time.time()
+                    snap_ready = False
+            else:
+                gesture_detected = "Tracking Active"
+                target_shape = active_target_data
+
+            # Reset snap trigger only after user opens fingers apart
+            if pinch_dist > 0.08:
+                snap_ready = True
 
         # Two-Hand Zoom
         if num_hands == 2:
@@ -221,6 +257,13 @@ while True:
             dist = math.hypot(p2[0] - p1[0], p2[1] - p1[1])
             target_scale = np.clip(dist / 220.0, 0.5, 2.5)
             current_scale += (target_scale - current_scale) * 0.1
+
+    # Hand Energy Aura Trails
+    for idx, (tx, ty) in enumerate(trail_points):
+        trail_rad = int(1 + (idx / len(trail_points)) * 5)
+        trail_alpha = idx / len(trail_points)
+        trail_color = (int(255 * trail_alpha), int(220 * trail_alpha), 50)
+        cv2.circle(display_frame, (tx, ty), trail_rad, trail_color, -1)
 
     # Physics interpolation (LERP)
     current_particles += (target_shape - current_particles) * 0.14
@@ -246,35 +289,27 @@ while True:
             py = int(cy + (y * fov) / depth)
 
             if 0 <= px < w and 0 <= py < h:
-                radius = 2 if depth > fov else 3
+                radius = 3 if depth > fov else 4
                 cv2.circle(display_frame, (px, py), radius, active_color, -1)
 
-    # Inspect HUD
-    if inspecting and pointer_pos:
-        px, py = pointer_pos
-        cv2.circle(display_frame, (px, py), 22, (0, 255, 255), 2)
-        cv2.line(display_frame, (px - 30, py), (px + 30, py), (0, 255, 255), 1)
-        cv2.line(display_frame, (px, py - 30), (px, py + 30), (0, 255, 255), 1)
+    # Real-time FPS calculation
+    curr_frame_time = time.time()
+    fps = 0.9 * fps + 0.1 * (1.0 / (curr_frame_time - prev_frame_time))
+    prev_frame_time = curr_frame_time
 
-        card_x, card_y = min(px + 35, w - 380), max(py - 60, 40)
-        cv2.rectangle(display_frame, (card_x, card_y), (card_x + 360, card_y + 90), (20, 20, 20), -1)
-        cv2.rectangle(display_frame, (card_x, card_y), (card_x + 360, card_y + 90), (0, 255, 255), 2)
-        
-        model_info = MODELS[current_model_idx]
-        cv2.putText(display_frame, f"INSPECTION: {model_info['name']}", (card_x + 10, card_y + 25), 
-                    cv2.FONT_HERSHEY_DUPLEX, 0.55, (0, 255, 255), 1)
-        cv2.putText(display_frame, model_info["desc_1"], (card_x + 10, card_y + 50), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (220, 220, 220), 1)
-        cv2.putText(display_frame, model_info["desc_2"], (card_x + 10, card_y + 75), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (180, 255, 180), 1)
-
-    # HUD Header
-    active_name = MODELS[current_model_idx]["name"]
+    # Telemetry HUD Overlays
     cv2.putText(display_frame, f"WONDERSNAP: {active_name}", (20, 40), 
                 cv2.FONT_HERSHEY_DUPLEX, 0.8, active_color, 2)
     cv2.putText(display_frame, f"Status: {gesture_detected}", (20, 75), 
                 cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 0), 2)
-    cv2.putText(display_frame, "[Snap]: Switch | [Point]: Inspect | [Fist]: Assemble | [Open]: Explode", 
+    
+    hud_fps_text = f"FPS: {int(fps)} | LATENCY: {latency_ms:.1f}ms"
+    cv2.putText(display_frame, hud_fps_text, (w - 320, 35), 
+                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 255), 1)
+    cv2.putText(display_frame, "ENGINE: NUMPY 3D PERSPECTIVE", (w - 320, 60), 
+                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (180, 180, 180), 1)
+
+    cv2.putText(display_frame, "[Snap]: Switch Model | [Fist]: Assemble | [Open]: Explode | [Wrist]: Rotate", 
                 (20, h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
 
     cv2.imshow("WonderSnap - Analysis Lab", display_frame)
